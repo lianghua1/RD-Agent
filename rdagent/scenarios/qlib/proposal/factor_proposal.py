@@ -4,6 +4,7 @@ from typing import List, Tuple
 from rdagent.components.coder.factor_coder.factor import FactorExperiment, FactorTask
 from rdagent.components.proposal import FactorHypothesis2Experiment, FactorHypothesisGen
 from rdagent.core.proposal import Hypothesis, Scenario, Trace
+from rdagent.scenarios.qlib.experiment.backtest_config import position_mode
 from rdagent.scenarios.qlib.experiment.factor_experiment import QlibFactorExperiment
 from rdagent.scenarios.qlib.experiment.model_experiment import QlibModelExperiment
 from rdagent.scenarios.qlib.experiment.quant_experiment import QlibQuantScenario
@@ -41,7 +42,9 @@ class QlibFactorHypothesisGen(FactorHypothesisGen):
                 else "Now, you need to try factors that can achieve high IC (e.g., machine learning-based factors)."
             ),
             "hypothesis_output_format": T("scenarios.qlib.prompts:factor_hypothesis_output_format").r(),
-            "hypothesis_specification": T("scenarios.qlib.prompts:factor_hypothesis_specification").r(),
+            "hypothesis_specification": T("scenarios.qlib.prompts:factor_hypothesis_specification").r(
+                position_mode=position_mode()
+            ),
         }
         return context_dict, True
 
@@ -99,12 +102,16 @@ class QlibFactorHypothesis2Experiment(FactorHypothesis2Experiment):
             description = response_dict[factor_name]["description"]
             formulation = response_dict[factor_name]["formulation"]
             variables = response_dict[factor_name]["variables"]
+            direction = str(response_dict[factor_name].get("direction", "both")).strip().lower()
+            if direction not in {"long", "short", "both"}:
+                direction = "both"
             tasks.append(
                 FactorTask(
                     factor_name=factor_name,
                     factor_description=description,
                     factor_formulation=formulation,
                     variables=variables,
+                    factor_direction=direction,
                 )
             )
 
@@ -128,5 +135,9 @@ class QlibFactorHypothesis2Experiment(FactorHypothesis2Experiment):
             if not duplicate:
                 unique_tasks.append(task)
 
-        exp.tasks = unique_tasks
+        # ``Experiment`` stores its tasks in ``sub_tasks``; the old ``tasks``
+        # assignment was a no-op, so duplicate filtering never took effect and
+        # ``sub_workspace_list`` kept the pre-filter length.  Rebuild both.
+        exp.sub_tasks = unique_tasks
+        exp.sub_workspace_list = [None] * len(unique_tasks)
         return exp

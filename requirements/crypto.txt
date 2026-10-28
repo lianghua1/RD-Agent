@@ -1,0 +1,20 @@
+# Pinned dependencies for the cryptocurrency scenario (Qlib data + backtest).
+#
+# Install with:  pip install "rdagent[crypto]"
+#
+# The base requirements.txt leaves the scientific stack unpinned, which let the
+# deployed crypto env drift (and silently break mlflow file-store, lightgbm
+# behaviour, ...). These pins match the working deployment. Bump them together
+# and re-run the crypto smoke test after any change.
+pyqlib==0.9.7
+lightgbm==4.7.0
+numpy==2.2.6
+pandas==2.3.3
+pyarrow==25.0.1
+tables==3.10.1
+scikit-learn==1.7.2
+mlflow==3.15.0
+litellm==1.104.2
+pydantic==2.14.0
+pydantic-settings==2.15.0
+openai==2.54.0

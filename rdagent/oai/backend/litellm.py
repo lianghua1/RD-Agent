@@ -44,6 +44,23 @@ class LiteLLMSettings(LLMSettings):
 LITELLM_SETTINGS = LiteLLMSettings()
 ACC_COST = 0.0
 
+#: Field-name fragments whose values must never be written to the log. The full
+#: settings object is logged once at startup, which previously leaked the chat
+#: and embedding API keys in cleartext into every captured stderr.
+_SECRET_KEY_MARKERS = ("api_key", "endpoint_key", "token", "secret", "password")
+
+
+def _redacted_settings(settings: Any) -> dict[str, Any]:
+    """``settings.model_dump()`` with credential fields masked."""
+
+    redacted: dict[str, Any] = {}
+    for key, value in settings.model_dump().items():
+        if value not in (None, "") and any(marker in key.lower() for marker in _SECRET_KEY_MARKERS):
+            redacted[key] = "***redacted***"
+        else:
+            redacted[key] = value
+    return redacted
+
 
 class LiteLLMAPIBackend(APIBackend):
     """LiteLLM implementation of APIBackend interface"""
@@ -52,8 +69,8 @@ class LiteLLMAPIBackend(APIBackend):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         if not self.__class__._has_logged_settings:
-            logger.info(f"{LITELLM_SETTINGS}")
-            logger.log_object(LITELLM_SETTINGS.model_dump(), tag="LITELLM_SETTINGS")
+            logger.info(f"{_redacted_settings(LITELLM_SETTINGS)}")
+            logger.log_object(_redacted_settings(LITELLM_SETTINGS), tag="LITELLM_SETTINGS")
             self.__class__._has_logged_settings = True
         super().__init__(*args, **kwargs)
 
@@ -82,6 +99,11 @@ class LiteLLMAPIBackend(APIBackend):
         response = embedding(
             model=model_name,
             input=input_content_list,
+            # Allow embeddings to use a different endpoint/key than chat: the
+            # chat path goes through the Quant Host gateway, embeddings go to
+            # the configured embedding provider.
+            api_base=LITELLM_SETTINGS.embedding_openai_base_url or None,
+            api_key=LITELLM_SETTINGS.embedding_openai_api_key or None,
         )
         response_list = [data["embedding"] for data in response.data]
         return response_list

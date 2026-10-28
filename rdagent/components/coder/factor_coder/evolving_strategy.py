@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict
+from typing import Any, Dict
 
 from rdagent.components.coder.CoSTEER.evaluators import CoSTEERSingleFeedback
 from rdagent.components.coder.CoSTEER.evolving_strategy import (
@@ -20,11 +20,57 @@ from rdagent.oai.llm_utils import APIBackend
 from rdagent.utils.agent.tpl import T
 
 
+def _empty_queried_knowledge(evo: EvolvingItem) -> CoSTEERQueriedKnowledgeV2:
+    """A fully-shaped, empty knowledge object for the ``with_knowledge=False`` path.
+
+    ``implement_one_task`` indexes the per-task maps of ``queried_knowledge``
+    directly (e.g. ``task_to_former_failed_traces[info][1]``), so an empty dict
+    would raise ``KeyError``. Every sub-task therefore gets an explicit entry.
+    A fresh (not default) dict is passed to the constructor because the data
+    container uses mutable default arguments.
+    """
+
+    knowledge = CoSTEERQueriedKnowledgeV2(
+        success_task_to_knowledge_dict={},
+        failed_task_info_set=set(),
+        task_to_former_failed_traces={},
+        task_to_similar_task_successful_knowledge={},
+        task_to_similar_error_successful_knowledge={},
+    )
+    for sub_task in evo.sub_tasks:
+        info = sub_task.get_task_information()
+        knowledge.task_to_former_failed_traces[info] = ([], None)
+        knowledge.task_to_similar_task_successful_knowledge[info] = []
+        knowledge.task_to_similar_error_successful_knowledge[info] = []
+    return knowledge
+
+
 class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.num_loop = 0
         self.haveSelected = False
+
+    def evolve_iter(
+        self,
+        *,
+        evo: EvolvingItem,
+        queried_knowledge: CoSTEERQueriedKnowledge | None = None,
+        evolving_trace: list = [],
+        **kwargs,
+    ) -> Generator[EvolvingItem, EvolvingItem, None]:
+        # ``with_knowledge=False`` (crypto without an embedding endpoint) makes
+        # the evolving agent hand us ``queried_knowledge=None``, but the shared
+        # multi-process strategy raises on that. Synthesise an empty knowledge
+        # object instead of aborting the loop.
+        if queried_knowledge is None:
+            queried_knowledge = _empty_queried_knowledge(evo)
+        yield from super().evolve_iter(
+            evo=evo,
+            queried_knowledge=queried_knowledge,
+            evolving_trace=evolving_trace,
+            **kwargs,
+        )
 
     def error_summary(
         self,
@@ -143,7 +189,7 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
                     user_prompt=user_prompt,
                     system_prompt=system_prompt,
                     json_mode=True,
-                    json_target_type=Dict[str, str],
+                    json_target_type=Dict[str, Any],
                 )
 
                 try:

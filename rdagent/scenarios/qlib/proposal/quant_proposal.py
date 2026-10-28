@@ -6,6 +6,7 @@ from rdagent.app.qlib_rd_loop.conf import QUANT_PROP_SETTING
 from rdagent.components.proposal import FactorAndModelHypothesisGen
 from rdagent.core.proposal import Hypothesis, Scenario, Trace
 from rdagent.oai.llm_utils import APIBackend
+from rdagent.scenarios.qlib.experiment.backtest_config import position_mode
 from rdagent.scenarios.qlib.proposal.bandit import (
     EnvController,
     extract_metrics_from_experiment,
@@ -158,7 +159,7 @@ class QlibQuantHypothesisGen(FactorAndModelHypothesisGen):
             "RAG": qaunt_rag,
             "hypothesis_output_format": T("scenarios.qlib.prompts:hypothesis_output_format_with_action").r(),
             "hypothesis_specification": (
-                T("scenarios.qlib.prompts:factor_hypothesis_specification").r()
+                T("scenarios.qlib.prompts:factor_hypothesis_specification").r(position_mode=position_mode())
                 if action == "factor"
                 else T("scenarios.qlib.prompts:model_hypothesis_specification").r()
             ),

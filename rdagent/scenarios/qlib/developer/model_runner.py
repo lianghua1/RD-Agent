@@ -6,6 +6,8 @@ from rdagent.core.conf import RD_AGENT_SETTINGS
 from rdagent.core.exception import ModelEmptyError
 from rdagent.core.utils import cache_with_pickle
 from rdagent.log import rdagent_logger as logger
+from rdagent.scenarios.qlib.crypto.conf import crypto_enabled
+from rdagent.scenarios.qlib.crypto.runtime import crypto_qlib_pythonpath, crypto_runner_env
 from rdagent.scenarios.qlib.developer.utils import process_factor_data
 from rdagent.scenarios.qlib.experiment.factor_experiment import QlibFactorExperiment
 from rdagent.scenarios.qlib.experiment.model_experiment import QlibModelExperiment
@@ -45,7 +47,7 @@ class QlibModelRunner(CachedRunner[QlibModelExperiment]):
                 combined_factors = SOTA_factor
                 combined_factors = combined_factors.sort_index()
                 combined_factors = combined_factors.loc[:, ~combined_factors.columns.duplicated(keep="last")]
-                new_columns = pd.MultiIndex.from_product([["feature"], combined_factors.columns])
+                new_columns = pd.MultiIndex.from_product([["feature"], [str(column) for column in combined_factors.columns]])
                 combined_factors.columns = new_columns
                 num_features = str(len(exp.base_features) + len(combined_factors.columns))
 
@@ -72,6 +74,12 @@ class QlibModelRunner(CachedRunner[QlibModelExperiment]):
         }
         if mbps.test_end is not None:
             env_to_use.update({"test_end": mbps.test_end})
+
+        # CRYPTO_MODE: override market, calendar, costs, label and segments.
+        if crypto_enabled():
+            env_to_use.update(crypto_runner_env())
+        if os.environ.get("CRYPTO_QLIB_FREQ", "day") != "day":
+            env_to_use["PYTHONPATH"] = crypto_qlib_pythonpath(env_to_use.get("PYTHONPATH", "./"))
 
         training_hyperparameters = exp.sub_tasks[0].training_hyperparameters
         if training_hyperparameters:

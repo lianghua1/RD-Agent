@@ -12,7 +12,7 @@ hypothesis_and_feedback: |-
   {% endfor %}
   ## Backtest Analysis and Feedback:
   {% if experiment.result is not none %}
-  Backtest Result: {{ experiment.result.loc[["IC", "1day.excess_return_without_cost.annualized_return", "1day.excess_return_without_cost.max_drawdown"]] }}
+  Backtest Result: {{ experiment.result.reindex(["IC", "Rank IC", "Long-Short Ann Return", "Long-Short Ann Sharpe", "1day.excess_return_with_cost.annualized_return", "1day.excess_return_with_cost.max_drawdown", "long_short.annualized_return", "long_short.sharpe", "short_only.annualized_return", "short_leg.annualized_return", "long_leg.annualized_return"]).dropna() }}
   {% endif %}
   Observation: {{ feedback.observations }}
   Hypothesis Evaluation: {{ feedback.hypothesis_evaluation }}
@@ -31,7 +31,7 @@ last_hypothesis_and_feedback: |-
   {% endfor %}
   ## Backtest Analysis and Feedback:
   {% if experiment.result is not none %}
-  Backtest Result: {{ experiment.result.loc[["IC", "1day.excess_return_without_cost.annualized_return", "1day.excess_return_without_cost.max_drawdown"]] }}
+  Backtest Result: {{ experiment.result.reindex(["IC", "Rank IC", "Long-Short Ann Return", "Long-Short Ann Sharpe", "1day.excess_return_with_cost.annualized_return", "1day.excess_return_with_cost.max_drawdown", "long_short.annualized_return", "long_short.sharpe", "short_only.annualized_return", "short_leg.annualized_return", "long_leg.annualized_return"]).dropna() }}
   {% endif %}
   Training Log: 
   Here, you need to focus on analyzing whether there are any issues with the training. If any problems are identified, you must correct them in the next iteration and clearly describe how the changes will be made in the hypothesis.
@@ -53,7 +53,7 @@ sota_hypothesis_and_feedback: |-
   {% endfor %}
   ## Backtest Analysis and Feedback:
   {% if experiment.result is not none %}
-  Backtest Result: {{ experiment.result.loc[["IC", "1day.excess_return_without_cost.annualized_return", "1day.excess_return_without_cost.max_drawdown"]] }}
+  Backtest Result: {{ experiment.result.reindex(["IC", "Rank IC", "Long-Short Ann Return", "Long-Short Ann Sharpe", "1day.excess_return_with_cost.annualized_return", "1day.excess_return_with_cost.max_drawdown", "long_short.annualized_return", "long_short.sharpe", "short_only.annualized_return", "short_leg.annualized_return", "long_leg.annualized_return"]).dropna() }}
   {% endif %}
   Training Log: {{ experiment.stdout }}
   Observation: {{ feedback.observations }}
@@ -93,6 +93,11 @@ model_hypothesis_specification: |-
   8. Use standard libraries for baseline models, but also explore custom architecture designs to investigate novel structures. After sufficient trials with traditional models, aim for innovation comparable to top-tier AI conferences (NeurIPS, ICLR, ICML, SIGKDD, etc.) in time series modeling.
 
 factor_hypothesis_specification: |-
+  Active portfolio mode: {{ position_mode }}.
+  - `long_only`: propose factors expected to identify outperformers; the backtest only holds the top quantile.
+  - `short_only`: propose factors expected to identify underperformers; the backtest only holds the bottom quantile. Valuation, crowding, funding, liquidation and failed-breakout theses are especially relevant.
+  - `long_short`: propose factors that separate both tails; both the long and short legs are scored, and a factor with a negative IC is useful if its bottom quantile underperforms.
+
   1. **1-5 Factors per Generation:**
     - Ensure each generation produces 1-5 factors.
     - Balance simplicity and complexity to build a robust factor library.
@@ -107,7 +112,11 @@ factor_hypothesis_specification: |-
   4. **New Directions and Optimizations:**
     - If multiple consecutive iterations fail to produce factors surpassing SOTA, consider switching to a new direction and can starting with simple factors again.
     - If optimizing a specific type of factor, proceed from simple to complex.
-  5. Note
+  5. Direction Awareness (Long / Short / Both):
+    - A factor is not inherently long-only. State whether you expect it to work on the long leg, the short leg, or both, and explain the economic mechanism.
+    - Short-side theses are encouraged: overvaluation, crowded positioning, funding pressure, liquidation cascades, failed breakouts, and negative momentum can all be valid.
+    - In long-short mode, prefer factors whose bottom quantile underperforms as well as whose top quantile outperforms. Do not assume a negative-IC factor is useless.
+  6. Note
     - Highlight that factors surpassing SOTA are included in the library to avoid re-implementation.
     - No matter how many factors you plan to generate, only reply with one set of hypothesis and reason. The hypothesis can include the proposal of multiple factors at the same time.
 
@@ -116,6 +125,7 @@ factor_experiment_output_format: |-
   {
       "factor name 1": {
           "description": "description of factor 1, start with its type, e.g. [Momentum Factor]",
+          "direction": "long | short | both",
           "formulation": "latex formulation of factor 1",
           "variables": {
               "variable or function name 1": "description of variable or function 1",
@@ -124,6 +134,7 @@ factor_experiment_output_format: |-
       },
       "factor name 2": {
           "description": "description of factor 2, start with its type, e.g. [Machine Learning based Factor]",
+          "direction": "long | short | both",
           "formulation": "latex formulation of factor 2",
           "variables": {
               "variable or function name 1": "description of variable or function 1",
@@ -184,10 +195,13 @@ factor_feedback_generation:
           - Avoid re-implementing previous factors as those that surpassed SOTA are already included in the factor library and will be used in each run.
       3. Final Goal: To continuously accumulate factors that surpass each iteration to maintain the best SOTA.
     
+    Active portfolio mode for this run: {{ position_mode }}.
     When judging the results:
-      1. Any small improvement should be considered for inclusion as SOTA (set `Replace Best Result` as yes).
-      2. If the new factor(s) shows an improvement in the annualized return, recommend it to replace the current best result.
-      3. Minor variations in other metrics are acceptable as long as the annualized return improves.
+      1. A small improvement can be included, but only when it is not explained by long-only market beta. If long-only improves while Rank IC stays flat and Long-Short return/Sharpe or max drawdown deteriorates materially, set `Replace Best Result` to no and say so explicitly.
+      2. long_only: use 1day.excess_return_with_cost.annualized_return and max drawdown as the primary criterion, but also require Rank IC and Long-Short not to collapse.
+      3. short_only: use short_only.annualized_return and short_leg.annualized_return; a positive short leg is required even in a falling market.
+      4. long_short: use long_short.annualized_return and long_short.sharpe as the primary criterion, and require both long_leg and short_leg to contribute. Net exposure must match the configured mode; do not reward a long-short run that silently degenerates into a long-only book.
+      5. Minor variations in other metrics are acceptable as long as the mode-specific criterion improves.
 
     Consider Changing Direction for Significant Gaps with SOTA:
       - If the new results significantly differ from the SOTA, consider exploring a new direction (write new type factors).
@@ -203,6 +217,9 @@ factor_feedback_generation:
       "Replace Best Result": "yes or no"
     }
   user: |-
+    Authoritative panel facts (use these; do NOT infer the universe size from the coder debug subset, topk, or a filename):
+    {{ panel_facts }}
+
     Target hypothesis: 
     {{ hypothesis_text }}
     Tasks and Factors:

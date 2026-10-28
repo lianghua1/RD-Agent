@@ -1,9 +1,9 @@
 qlib_init:
-    provider_uri: "~/.qlib/qlib_data/cn_data"
-    region: cn
+    provider_uri: "{{ provider_uri | default('~/.qlib/qlib_data/cn_data', true) }}"
+    region: {{ region | default('cn', true) }}
 
-market: &market csi300
-benchmark: &benchmark SH000300
+market: &market {{ market | default('csi300', true) }}
+benchmark: &benchmark {{ benchmark | default('SH000300', true) }}
 
 data_handler_config: &data_handler_config
     start_time: {{ train_start | default("2008-01-01", true) }}
@@ -17,7 +17,7 @@ data_handler_config: &data_handler_config
                   kwargs:
                     config:
                         label: 
-                            - ["Ref($close, -2)/Ref($close, -1) - 1"]
+                            - ["{{ label_expression | default('Ref($close, -2)/Ref($close, -1) - 1', true) }}"]
                             - ["LABEL0"]
                         feature:
                             - {{ feature_expressions }}
@@ -48,19 +48,20 @@ port_analysis_config: &port_analysis_config
         module_path: qlib.contrib.strategy
         kwargs:
             signal: <PRED>
-            topk: 50
-            n_drop: 5
+            topk: {{ topk | default(50, true) }}
+            n_drop: {{ n_drop | default(5, true) }}
     backtest:
         start_time: {{ test_start | default("2017-01-01", true) }}
         end_time: {{ test_end | default("null", true) }}
-        account: 100000000
+        account: {{ account | default(100000000, true) }}
         benchmark: *benchmark
         exchange_kwargs:
-            limit_threshold: 0.095
+            limit_threshold: {{ limit_threshold | default(0.095, true) }}
             deal_price: close
-            open_cost: 0.0005
-            close_cost: 0.0015
-            min_cost: 5
+            open_cost: {{ open_cost | default(0.0005, true) }}
+            close_cost: {{ close_cost | default(0.0015, true) }}
+            min_cost: {{ min_cost | default(5, true) }}
+            trade_unit: {{ trade_unit | default(100, true) }}
 
 task:
     model:
@@ -102,8 +103,8 @@ task:
         - class: SigAnaRecord
           module_path: qlib.workflow.record_temp
           kwargs: 
-            ana_long_short: False
-            ann_scaler: 252
+            ana_long_short: True
+            ann_scaler: {{ ann_scaler | default(252, true) }}
         - class: PortAnaRecord
           module_path: qlib.workflow.record_temp
           kwargs: 

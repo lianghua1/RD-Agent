@@ -37,8 +37,35 @@ def _build_execute_calls(exp: QlibFactorExperiment, base_feature_workspaces: lis
             if implementation and feedback
         )
 
-    execute_calls.extend((workspace.execute, ("All",)) for workspace in base_feature_workspaces)
+    execute_calls.extend((_execute_base_feature_workspace, (workspace,)) for workspace in base_feature_workspaces)
     return execute_calls
+
+
+def _execute_base_feature_workspace(workspace: FactorFBWorkspace) -> tuple[str, pd.DataFrame | None]:
+    """Execute a base-feature code file and name its output after the factor.
+
+    Imported base factors typically write a bare Series whose name carries over
+    from the source panel (often ``$close``); two such bases then collapse onto
+    one column in the combined factors and lose their identity. Rename
+    single-column output to the factor file stem before merging.
+    """
+
+    feedback, value = workspace.execute("All")
+    if value is None:
+        return feedback, None
+    factor_name = ""
+    if workspace.target_task is not None:
+        factor_name = str(getattr(workspace.target_task, "factor_name", "") or "")
+    if not factor_name:
+        return feedback, value
+    if factor_name.endswith(".py"):
+        factor_name = factor_name[: -len(".py")]
+    if isinstance(value, pd.Series):
+        return feedback, value.to_frame(name=factor_name)
+    if getattr(value, "shape", (0, 0))[1:] == (1,):
+        value = value.copy()
+        value.columns = [factor_name]
+    return feedback, value
 
 
 def _resolve_index_level_values(df: pd.DataFrame, level_name: str) -> pd.Index | None:

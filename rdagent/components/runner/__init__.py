@@ -1,3 +1,5 @@
+import os
+
 from rdagent.core.developer import Developer
 from rdagent.core.experiment import ASpecificExp, Experiment
 from rdagent.oai.llm_utils import md5_hash
@@ -11,6 +13,9 @@ class CachedRunner(Developer[ASpecificExp]):
         all_tasks.extend(exp.sub_tasks)
         task_info_list = [task.get_task_information() for task in all_tasks]
         task_info_str = "\n".join(task_info_list)
+        position_mode = os.environ.get("FACTOR_POSITION_MODE", "").strip().lower().replace("-", "_")
+        if position_mode:
+            task_info_str += f"\nposition_mode={position_mode}"
         return md5_hash(task_info_str)
 
     def assign_cached_result(self, exp: Experiment, cached_res: Experiment) -> Experiment:

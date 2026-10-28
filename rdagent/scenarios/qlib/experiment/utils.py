@@ -7,6 +7,7 @@ import pandas as pd
 from jinja2 import Environment, StrictUndefined
 
 from rdagent.components.coder.factor_coder.config import FACTOR_COSTEER_SETTINGS
+from rdagent.scenarios.qlib.crypto.conf import CRYPTO_MARKET_NOTE, crypto_enabled
 from rdagent.utils.env import QTDockerEnv
 
 
@@ -49,6 +50,38 @@ def generate_data_folder_from_qlib():
         Path(__file__).parent / "factor_data_template" / "README.md",
         Path(FACTOR_COSTEER_SETTINGS.data_folder_debug) / "README.md",
     )
+
+
+def generate_data_folder_from_crypto():
+    """Materialise the CoSTEER data folders from an already-built crypto dataset.
+
+    Unlike the A-share path there is nothing to generate here: the crypto
+    download/convert pipeline (``python -m rdagent.scenarios.qlib.crypto.build``)
+    is an explicit, network-heavy action, so this only validates and copies.
+    """
+
+    from rdagent.scenarios.qlib.crypto.conf import CRYPTO_SETTINGS
+
+    settings = CRYPTO_SETTINGS
+    all_h5 = settings.data_dir / "daily_pv_all.h5"
+    debug_h5 = settings.data_dir / "daily_pv_debug.h5"
+    readme = settings.data_dir / "README.md"
+    if not all_h5.exists() or not debug_h5.exists():
+        raise FileNotFoundError(
+            f"Crypto dataset not found under {settings.data_dir}. Build it first:\n"
+            f"  CRYPTO_MODE=true python -m rdagent.scenarios.qlib.crypto.build "
+            f"--market {settings.market} --freq {settings.freq}"
+        )
+
+    for source, folder in (
+        (all_h5, FACTOR_COSTEER_SETTINGS.data_folder),
+        (debug_h5, FACTOR_COSTEER_SETTINGS.data_folder_debug),
+    ):
+        target = Path(folder)
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source, target / "daily_pv.h5")
+        if readme.exists():
+            shutil.copy(readme, target / "README.md")
 
 
 def get_file_desc(p: Path, variable_list=[]) -> str:
@@ -169,7 +202,10 @@ def get_data_folder_intro(fname_reg: str = ".*", flags=0, variable_mapping=None)
     ):
         # FIXME: (xiao) I think this is writing in a hard-coded way.
         # get data folder intro does not imply that we are generating the data folder.
-        generate_data_folder_from_qlib()
+        if crypto_enabled():
+            generate_data_folder_from_crypto()
+        else:
+            generate_data_folder_from_qlib()
     content_l = []
     for p in Path(FACTOR_COSTEER_SETTINGS.data_folder_debug).iterdir():
         if re.match(fname_reg, p.name, flags) is not None:
@@ -177,4 +213,7 @@ def get_data_folder_intro(fname_reg: str = ".*", flags=0, variable_mapping=None)
                 content_l.append(get_file_desc(p, variable_mapping.get(p.stem, [])))
             else:
                 content_l.append(get_file_desc(p))
-    return "\n----------------- file splitter -------------\n".join(content_l)
+    intro = "\n----------------- file splitter -------------\n".join(content_l)
+    if crypto_enabled():
+        intro += "\n\n" + CRYPTO_MARKET_NOTE
+    return intro

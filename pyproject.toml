@@ -121,6 +121,7 @@ lint = {file = ["requirements/lint.txt"]}
 package = {file = ["requirements/package.txt"]}
 test = {file = ["requirements/test.txt"]}
 torch = {file = ["requirements/torch.txt"]} # some agent algorithms need torch.  pip install rdagent[torch]
+crypto = {file = ["requirements/crypto.txt"]} # pinned stack for the crypto scenario. pip install rdagent[crypto]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"

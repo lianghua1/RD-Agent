@@ -1,3 +1,8 @@
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
 from rdagent.core.experiment import FBWorkspace
 from rdagent.utils.env import QlibCondaConf, QlibCondaEnv
 
@@ -185,6 +190,41 @@ ALPHA158 = {
     "VSUMD60": "(Sum(Greater($volume-Ref($volume, 1), 0), 60)-Sum(Greater(Ref($volume, 1)-$volume, 0), 60))/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)",
 }
 
+
+def crypto_mode_enabled() -> bool:
+    """Whether the crypto scenario is active (``CRYPTO_MODE=true``).
+
+    Read straight from the environment so this module stays dependency-free and
+    cannot introduce an import cycle with the scenario packages.
+    """
+
+    return os.environ.get("CRYPTO_MODE", "").strip().lower() == "true"
+
+
+def get_base_factors() -> dict[str, str]:
+    """Base feature library for the current market.
+
+    Crypto -> our own OHLCV-only crypto library. Otherwise the original
+    A-share ``ALPHA20``, unchanged.
+    """
+
+    if crypto_mode_enabled():
+        from rdagent.utils.crypto_factors import CRYPTO_BASE
+
+        return CRYPTO_BASE
+    return ALPHA20
+
+
+def get_all_factors() -> dict[str, str]:
+    """Full feature library for the current market."""
+
+    if crypto_mode_enabled():
+        from rdagent.utils.crypto_factors import CRYPTO_ALL
+
+        return CRYPTO_ALL
+    return ALPHA158
+
+
 _TFW = FBWorkspace()  # test feature workspace
 TEST_FEATURE_CODE = """
 import qlib  
@@ -195,9 +235,70 @@ expressions = {experessions}
 df = D.features(["SH600000"], expressions, start_time="2008-01-01", end_time="2020-08-31")
 """
 
+TEST_FEATURE_CODE_CRYPTO = """
+import qlib
+from qlib.data import D
+
+qlib.init(provider_uri={provider_uri}, region="cn")
+expressions = {experessions}
+df = D.features([{instrument}], expressions, start_time={start}, end_time={end})
+assert not df.empty, "feature validation returned no rows"
+"""
+
+
+def _crypto_validation_target() -> tuple[str, str, str, str] | None:
+    """Provider/instrument/date-range the crypto validation should exercise.
+
+    The A-share probe replays ``SH600000`` on the default ``cn_data`` provider,
+    which does not exist in the crypto deployment; validating crypto base
+    features against it always failed, silently dropping user
+    ``base_factors.json`` entries. Resolve the provider the same way the run
+    does (``CRYPTO_BIN_ROOT`` / ``CRYPTO_DATASET_NAME`` overrides included) and
+    pick a real instrument from that provider.
+    """
+
+    from rdagent.scenarios.qlib.crypto.conf import CRYPTO_SETTINGS
+
+    provider = Path(CRYPTO_SETTINGS.provider_uri)
+    instruments_file = provider / "instruments" / "all.txt"
+    try:
+        codes = [
+            line.split("\t")[0].strip()
+            for line in instruments_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except OSError:
+        return None
+    if not codes:
+        return None
+    instrument = "BTCUSDT" if "BTCUSDT" in codes else codes[0]
+    start = "2022-01-01"
+    end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        meta = json.loads((provider / "crypto_meta.json").read_text(encoding="utf-8"))
+        start = str(meta.get("start") or start)
+        end = str(meta.get("end") or end)
+    except (OSError, ValueError):
+        pass
+    return str(provider), instrument, start, end
+
 
 def validate_qlib_features(expressions: list[str]) -> bool:
-    _TFW.inject_files(**{"test_fea.py": TEST_FEATURE_CODE.format(experessions=str(expressions))})
+    if crypto_mode_enabled():
+        target = _crypto_validation_target()
+        if target is None:
+            return False
+        provider_uri, instrument, start, end = target
+        code = TEST_FEATURE_CODE_CRYPTO.format(
+            experessions=str(expressions),
+            provider_uri=repr(provider_uri),
+            instrument=repr(instrument),
+            start=repr(start),
+            end=repr(end),
+        )
+    else:
+        code = TEST_FEATURE_CODE.format(experessions=str(expressions))
+    _TFW.inject_files(**{"test_fea.py": code})
 
     qlib_env = QlibCondaEnv(conf=QlibCondaConf())
     qlib_env.prepare()

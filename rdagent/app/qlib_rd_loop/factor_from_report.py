@@ -43,7 +43,7 @@ def generate_hypothesis(factor_result: dict, report_content: str) -> str:
         user_prompt=user_prompt,
         system_prompt=system_prompt,
         json_mode=True,
-        json_target_type=Dict[str, str],
+        json_target_type=Dict[str, Any],
     )
 
     response_json = json.loads(response)

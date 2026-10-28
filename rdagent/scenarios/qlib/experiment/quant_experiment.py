@@ -20,6 +20,8 @@ from rdagent.components.coder.model_coder.model import (
 )
 from rdagent.core.experiment import Task
 from rdagent.core.scenario import Scenario
+from rdagent.scenarios.qlib.crypto.conf import CRYPTO_MARKET_NOTE, crypto_enabled
+from rdagent.scenarios.qlib.crypto.runtime import crypto_prompt_args
 from rdagent.scenarios.qlib.experiment.utils import get_data_folder_intro
 from rdagent.scenarios.qlib.experiment.workspace import QlibFBWorkspace
 from rdagent.scenarios.shared.get_runtime_info import get_runtime_environment_by_env
@@ -44,16 +46,19 @@ class QlibQuantScenario(Scenario):
         self._source_data = deepcopy(get_data_folder_intro())
 
         self._rich_style_description = deepcopy(T(".prompts:qlib_factor_rich_style_description").r())
-        self._experiment_setting = deepcopy(
-            T(".prompts:qlib_factor_experiment_setting").r(
-                train_start=QUANT_PROP_SETTING.train_start,
-                train_end=QUANT_PROP_SETTING.train_end,
-                valid_start=QUANT_PROP_SETTING.valid_start,
-                valid_end=QUANT_PROP_SETTING.valid_end,
-                test_start=QUANT_PROP_SETTING.test_start,
-                test_end=QUANT_PROP_SETTING.test_end,
-            )
+        setting_args = (
+            crypto_prompt_args()
+            if crypto_enabled()
+            else {
+                "train_start": QUANT_PROP_SETTING.train_start,
+                "train_end": QUANT_PROP_SETTING.train_end,
+                "valid_start": QUANT_PROP_SETTING.valid_start,
+                "valid_end": QUANT_PROP_SETTING.valid_end,
+                "test_start": QUANT_PROP_SETTING.test_start,
+                "test_end": QUANT_PROP_SETTING.test_end,
+            }
         )
+        self._experiment_setting = deepcopy(T(".prompts:qlib_factor_experiment_setting").r(**setting_args))
 
     def background(self, tag=None) -> str:
         assert tag in [None, "factor", "model"]
@@ -72,12 +77,13 @@ class QlibQuantScenario(Scenario):
         )
 
         # TODO: There are some issues here
+        crypto_note = ("\n\n" + CRYPTO_MARKET_NOTE) if crypto_enabled() else ""
         if tag is None:
-            return quant_background + "\n" + factor_background + "\n" + model_background
+            return quant_background + "\n" + factor_background + "\n" + model_background + crypto_note
         elif tag == "factor":
-            return factor_background
+            return factor_background + crypto_note
         else:
-            return model_background
+            return model_background + crypto_note
 
     def get_source_data_desc(self) -> str:
         return self._source_data
@@ -85,7 +91,12 @@ class QlibQuantScenario(Scenario):
     def output_format(self, tag=None) -> str:
         assert tag in [None, "factor", "model"]
         factor_output_format = (
-            "The factor code should output the following format:\n" + T(".prompts:qlib_factor_output_format").r()
+            "The factor code should output the following format:\n"
+            + T(
+                ".prompts:qlib_factor_output_format_crypto"
+                if crypto_enabled()
+                else ".prompts:qlib_factor_output_format"
+            ).r()
         )
         model_output_format = (
             "The model code should output the following format:\n" + T(".prompts:qlib_model_output_format").r()

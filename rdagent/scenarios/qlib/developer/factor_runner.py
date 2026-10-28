@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -12,12 +13,29 @@ from rdagent.app.qlib_rd_loop.conf import FactorBasePropSetting
 from rdagent.components.runner import CachedRunner
 from rdagent.core.exception import FactorEmptyError
 from rdagent.log import rdagent_logger as logger
+from rdagent.scenarios.qlib.crypto.conf import crypto_enabled
+from rdagent.scenarios.qlib.crypto.runtime import crypto_qlib_pythonpath, crypto_runner_env
 from rdagent.scenarios.qlib.developer.utils import process_factor_data
+from rdagent.scenarios.qlib.experiment.backtest_config import factor_backtest_env
 from rdagent.scenarios.qlib.experiment.factor_experiment import QlibFactorExperiment
 from rdagent.scenarios.qlib.experiment.model_experiment import QlibModelExperiment
 
 DIRNAME = Path(__file__).absolute().resolve().parent
 DIRNAME_local = Path.cwd()
+
+
+def _instrument_count(provider_uri: str | None) -> int:
+    """Count the instruments in a Qlib provider's ``instruments/all.txt``."""
+
+    if not provider_uri:
+        return 0
+    path = Path(provider_uri) / "instruments" / "all.txt"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    return sum(1 for line in lines if line.strip())
+
 
 # TODO: supporting multiprocessing and keep previous results
 
@@ -48,6 +66,17 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
         # if the IC is larger than a threshold, remove the new_feature column
         # return the new_feature
 
+        # A one-instrument panel has no cross-section, so per-date correlation
+        # is NaN and the old filter would drop every new factor.  Keep them;
+        # the single-instrument path is evaluated with time-series statistics.
+        try:
+            n_instruments = new_feature.index.get_level_values("instrument").nunique()
+        except (KeyError, AttributeError):
+            n_instruments = 0
+        if n_instruments < 2:
+            logger.info("Skipping cross-sectional factor deduplication on a single-instrument panel.")
+            return new_feature
+
         concat_feature = pd.concat([SOTA_feature, new_feature], axis=1)
         IC_max = (
             concat_feature.groupby("datetime")
@@ -58,7 +87,9 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
         )
         IC_max.index = pd.MultiIndex.from_product([range(SOTA_feature.shape[1]), range(new_feature.shape[1])])
         IC_max = IC_max.unstack().max(axis=0)
-        return new_feature.iloc[:, IC_max[IC_max < 0.99].index]
+        # A factor and its negation are perfectly anti-correlated; for a
+        # long/short book they are redundant, so deduplicate on |corr|.
+        return new_feature.iloc[:, IC_max[IC_max.abs() < 0.99].index]
 
     @cache_with_pickle(CachedRunner.get_cache_key, CachedRunner.assign_cached_result)
     def develop(self, exp: QlibFactorExperiment) -> QlibFactorExperiment:
@@ -84,6 +115,35 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
         if fbps.test_end is not None:
             env_to_use.update({"test_end": fbps.test_end})
 
+        # CRYPTO_MODE: override market, calendar, costs, label and segments.
+        # Runs after the A-share defaults, so crypto wins only when enabled.
+        if crypto_enabled():
+            env_to_use.update(crypto_runner_env())
+        if os.environ.get("CRYPTO_QLIB_FREQ", "day") != "day":
+            env_to_use["PYTHONPATH"] = crypto_qlib_pythonpath(env_to_use.get("PYTHONPATH", "./"))
+        # The internal simulator consumes these; long_only keeps the old path.
+        env_to_use.update(factor_backtest_env(env_to_use))
+        # Templates use this to decide whether cross-sectional label
+        # normalization is meaningful.  With one instrument CSZScoreNorm
+        # converts every label to NaN; the model then trains a dummy tree and
+        # every factor set reports the same metrics.
+        n_instruments = _instrument_count(env_to_use.get("provider_uri"))
+        env_to_use["n_instruments"] = str(n_instruments)
+        env_to_use["FACTOR_N_INSTRUMENTS"] = str(n_instruments)
+        # The feedback generator runs in this process, not in the qrun
+        # subprocess. Mirror the frequency/width variables so its metric list
+        # matches the recorder's report prefix and single-asset mode.
+        for mirror_key in (
+            "FACTOR_N_INSTRUMENTS",
+            "CRYPTO_FREQ",
+            "CRYPTO_QLIB_FREQ",
+            "CRYPTO_REPORT_FREQ",
+            "FACTOR_ANN_SCALER",
+            "FACTOR_REBALANCE_DAYS",
+        ):
+            if mirror_key in env_to_use:
+                os.environ[mirror_key] = env_to_use[mirror_key]
+
         if exp.based_experiments:
             SOTA_factor = None
             # Filter and retain only QlibFactorExperiment instances
@@ -96,6 +156,19 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
 
             # Process the new factors data
             logger.info(f"New factor processing ...")
+            if crypto_enabled() and exp.sub_tasks:
+                feedbacks = exp.prop_dev_feedback or []
+                accepted = sum(
+                    1
+                    for implementation, feedback in zip(exp.sub_workspace_list, feedbacks)
+                    if implementation is not None and bool(feedback)
+                )
+                if accepted < len(exp.sub_tasks):
+                    raise FactorEmptyError(
+                        f"{len(exp.sub_tasks) - accepted} of {len(exp.sub_tasks)} candidate factors "
+                        "were not implemented successfully; refusing to report a base-only "
+                        "backtest as a candidate run."
+                    )
             new_factors = process_factor_data(exp)
 
             if new_factors.empty:
@@ -115,11 +188,14 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
             # Sort and nest the combined factors under 'feature'
             combined_factors = combined_factors.sort_index()
             combined_factors = combined_factors.loc[:, ~combined_factors.columns.duplicated(keep="last")]
-            new_columns = pd.MultiIndex.from_product([["feature"], combined_factors.columns])
+            new_columns = pd.MultiIndex.from_product([["feature"], [str(column) for column in combined_factors.columns]])
             combined_factors.columns = new_columns
             logger.info(f"Factor data processing completed.")
 
-            num_features = len(exp.base_features) + len(combined_factors.columns)
+            # ``combined_factors`` already contains the base-feature columns
+            # (process_factor_data executes both).  Adding len(base_features)
+            # again over-counted the model input width.
+            num_features = len(combined_factors.columns)
 
             # Due to the rdagent and qlib docker image in the numpy version of the difference,
             # the `combined_factors_df.pkl` file could not be loaded correctly in qlib dokcer,
@@ -176,7 +252,7 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
                 factors = process_factor_data(exp)
                 factors = factors.sort_index()
                 factors = factors.loc[:, ~factors.columns.duplicated(keep="last")]
-                new_columns = pd.MultiIndex.from_product([["feature"], factors.columns])
+                new_columns = pd.MultiIndex.from_product([["feature"], [str(column) for column in factors.columns]])
                 factors.columns = new_columns
                 target_path = exp.experiment_workspace.workspace_path / "combined_factors_df.parquet"
                 # Save the combined factors to the workspace
@@ -195,6 +271,28 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
         if result is None:
             logger.error(f"Failed to run this experiment, because {stdout}")
             raise FactorEmptyError(f"Failed to run this experiment, because {stdout}")
+
+        # Guard against a "successful" Qlib run whose model never trained.  A
+        # constant prediction makes every candidate set look identical to the
+        # baseline and previously produced false "completed" runs.
+        l2_train = None
+        try:
+            l2_train = float(result.get("l2.train")) if hasattr(result, "get") else None
+        except (TypeError, ValueError):
+            l2_train = None
+        if l2_train is not None and l2_train == 0.0:
+            raise FactorEmptyError(
+                "Degenerate backtest: the model did not train (l2.train=0). "
+                "Labels/features are likely invalid (often a one-instrument "
+                "cross-section normalized with CSZScoreNorm)."
+            )
+        if n_instruments >= 2:
+            ic = result.get("IC") if hasattr(result, "get") else None
+            if ic is None or pd.isna(ic):
+                raise FactorEmptyError(
+                    "Degenerate backtest: cross-sectional IC is undefined. "
+                    "Refusing to compare a constant prediction with SOTA."
+                )
 
         exp.result = result
         exp.stdout = stdout

@@ -10,6 +10,8 @@ from rdagent.components.coder.model_coder.model import (
 )
 from rdagent.core.experiment import Task
 from rdagent.core.scenario import Scenario
+from rdagent.scenarios.qlib.crypto.conf import CRYPTO_MARKET_NOTE, crypto_enabled
+from rdagent.scenarios.qlib.crypto.runtime import crypto_prompt_args
 from rdagent.scenarios.qlib.experiment.workspace import QlibFBWorkspace
 from rdagent.scenarios.shared.get_runtime_info import get_runtime_environment_by_env
 from rdagent.utils.agent.tpl import T
@@ -31,20 +33,25 @@ class QlibModelScenario(Scenario):
                 runtime_environment=self.get_runtime_environment(),
             )
         )
+        if crypto_enabled():
+            self._background += "\n\n" + CRYPTO_MARKET_NOTE
         self._output_format = deepcopy(T(".prompts:qlib_model_output_format").r())
         self._interface = deepcopy(T(".prompts:qlib_model_interface").r())
         self._simulator = deepcopy(T(".prompts:qlib_model_simulator").r())
         self._rich_style_description = deepcopy(T(".prompts:qlib_model_rich_style_description").r())
-        self._experiment_setting = deepcopy(
-            T(".prompts:qlib_model_experiment_setting").r(
-                train_start=MODEL_PROP_SETTING.train_start,
-                train_end=MODEL_PROP_SETTING.train_end,
-                valid_start=MODEL_PROP_SETTING.valid_start,
-                valid_end=MODEL_PROP_SETTING.valid_end,
-                test_start=MODEL_PROP_SETTING.test_start,
-                test_end=MODEL_PROP_SETTING.test_end,
-            )
+        setting_args = (
+            crypto_prompt_args()
+            if crypto_enabled()
+            else {
+                "train_start": MODEL_PROP_SETTING.train_start,
+                "train_end": MODEL_PROP_SETTING.train_end,
+                "valid_start": MODEL_PROP_SETTING.valid_start,
+                "valid_end": MODEL_PROP_SETTING.valid_end,
+                "test_start": MODEL_PROP_SETTING.test_start,
+                "test_end": MODEL_PROP_SETTING.test_end,
+            }
         )
+        self._experiment_setting = deepcopy(T(".prompts:qlib_model_experiment_setting").r(**setting_args))
 
     @property
     def background(self) -> str:

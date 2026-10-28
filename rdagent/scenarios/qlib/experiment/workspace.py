@@ -1,4 +1,5 @@
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,17 @@ class QlibFBWorkspace(FBWorkspace):
             logger.error(f"Unknown env_type: {MODEL_COSTEER_SETTINGS.env_type}")
             return None, "Unknown environment type"
         qtde.prepare()
+
+        # Never let read_exp_res.py pick a recorder left by a previous qrun in
+        # this workspace: remove the local MLflow store and derived result
+        # files before starting a new run.
+        mlruns = self.workspace_path / "mlruns"
+        if mlruns.exists():
+            shutil.rmtree(mlruns, ignore_errors=True)
+        for stale_name in ("qlib_res.csv", "ret.parquet"):
+            stale = self.workspace_path / stale_name
+            if stale.exists():
+                stale.unlink()
 
         # Run the Qlib backtest
         execute_qlib_log = qtde.check_output(

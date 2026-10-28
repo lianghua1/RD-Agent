@@ -29,6 +29,7 @@ class FactorTask(CoSTEERTask):
         variables: dict = {},
         resource: str = None,
         factor_implementation: bool = False,
+        factor_direction: str = "both",
         **kwargs,
     ) -> None:
         self.factor_name = (
@@ -36,6 +37,7 @@ class FactorTask(CoSTEERTask):
         )
         self.factor_formulation = factor_formulation
         self.variables = variables
+        self.factor_direction = factor_direction
         self.factor_resources = resource
         self.factor_implementation = factor_implementation
         super().__init__(name=factor_name, description=factor_description, *args, **kwargs)
@@ -48,12 +50,14 @@ class FactorTask(CoSTEERTask):
     def get_task_information(self):
         return f"""factor_name: {self.factor_name}
 factor_description: {self.factor_description}
+factor_direction: {getattr(self, "factor_direction", "both")}
 factor_formulation: {self.factor_formulation}
 variables: {str(self.variables)}"""
 
     def get_task_brief_information(self):
         return f"""factor_name: {self.factor_name}
 factor_description: {self.factor_description}
+factor_direction: {getattr(self, "factor_direction", "both")}
 factor_formulation: {self.factor_formulation}
 variables: {str(self.variables)}"""
 
@@ -61,6 +65,7 @@ variables: {str(self.variables)}"""
         return {
             "factor_name": self.factor_name,
             "factor_description": self.factor_description,
+            "factor_direction": getattr(self, "factor_direction", "both"),
             "factor_formulation": self.factor_formulation,
             "variables": str(self.variables),
             "factor_implementation": str(self.factor_implementation),
