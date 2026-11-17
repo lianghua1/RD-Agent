@@ -70,7 +70,7 @@ class CryptoDataSettings(ExtendedBaseSettings):
 
     Every field maps to an environment variable with the ``CRYPTO_`` prefix
     (e.g. ``market`` -> ``CRYPTO_MARKET``).  Defaults target Binance USDT-M
-    perpetual futures, daily bars, top-50 by quote volume.
+    perpetual futures, daily bars, point-in-time top-50 by quote volume.
     """
 
     model_config = SettingsConfigDict(env_prefix="CRYPTO_", protected_namespaces=())
@@ -119,9 +119,10 @@ class CryptoDataSettings(ExtendedBaseSettings):
     """Aggregation period for Binance futures-data endpoints (``1d`` for daily)."""
 
     # -- universe -----------------------------------------------------------
-    universe_mode: str = "top_n"
-    """``top_n`` (rank by today's 24h quote volume), ``point_in_time`` (rank by
-    volume at the start of the requested range) or ``explicit``."""
+    universe_mode: str = "point_in_time"
+    """``point_in_time`` (rank by volume at the start of the requested range,
+    the default), ``top_n`` (rank by today's 24h quote volume, look-ahead
+    survivorship bias: only use it for live/current snapshots) or ``explicit``."""
 
     universe_size: int = 50
     """How many symbols to keep when ranking the universe."""
@@ -201,6 +202,14 @@ class CryptoDataSettings(ExtendedBaseSettings):
 
     min_cost: float = 0.0
     """Minimum commission per trade."""
+
+    short_borrow_rate: float = 0.10
+    """Annualised borrow cost on short notional (fraction of notional).
+
+    ``long_short_backtest.py`` charges this when derivatives funding history is
+    unavailable (``include_derivatives`` off). Set ``CRYPTO_SHORT_BORROW_RATE=0``
+    to reproduce the old zero-carry behaviour.
+    """
 
     trade_unit: float = 1.0
     """Tradable unit. Must be 1 for crypto; Qlib defaults to 100 (A-share lots)."""
@@ -397,6 +406,7 @@ class CryptoDataSettings(ExtendedBaseSettings):
             "open_cost": str(self.open_cost),
             "close_cost": str(self.close_cost),
             "min_cost": str(self.min_cost),
+            "short_borrow_rate": str(self.short_borrow_rate),
             "trade_unit": str(self.trade_unit),
             "topk": str(self.topk),
             "n_drop": str(self.n_drop),

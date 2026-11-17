@@ -153,6 +153,17 @@ def test_universe_point_in_time_uses_start_window_not_today(tmp_path):
     assert resolve_universe(settings, adapter) == ["LUNAUSDT", "BTCUSDT"]
 
 
+def test_universe_defaults_to_point_in_time(tmp_path):
+    adapter = FakeAdapter(
+        listed=["BTCUSDT", "LUNAUSDT"],
+        volumes={"BTCUSDT": 100, "LUNAUSDT": 1},
+        window={"BTCUSDT": 10, "LUNAUSDT": 1000},
+    )
+    settings = _settings(tmp_path, universe_size=2)
+    assert settings.universe_mode == "point_in_time"
+    assert resolve_universe(settings, adapter) == ["LUNAUSDT", "BTCUSDT"]
+
+
 def test_universe_explicit_drops_unlisted(tmp_path):
     adapter = FakeAdapter(listed=["BTCUSDT", "ETHUSDT"])
     settings = _settings(tmp_path, universe_mode="explicit", symbols="btcusdt,ETHUSDT,ZZZUSDT")

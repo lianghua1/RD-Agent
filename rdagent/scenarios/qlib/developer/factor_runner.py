@@ -29,7 +29,7 @@ def _instrument_count(provider_uri: str | None) -> int:
 
     if not provider_uri:
         return 0
-    path = Path(provider_uri) / "instruments" / "all.txt"
+    path = Path(provider_uri).expanduser() / "instruments" / "all.txt"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -127,8 +127,15 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
         # normalization is meaningful.  With one instrument CSZScoreNorm
         # converts every label to NaN; the model then trains a dummy tree and
         # every factor set reports the same metrics.
-        n_instruments = _instrument_count(env_to_use.get("provider_uri"))
-        env_to_use["n_instruments"] = str(n_instruments)
+        # An undefined n_instruments falls back to 2 in the Jinja templates;
+        # injecting "0" would disable CSZScoreNorm/PortAnaRecord on the A-share
+        # path, where no provider_uri is set.
+        provider_uri = env_to_use.get("provider_uri") or "~/.qlib/qlib_data/cn_data"
+        n_instruments = _instrument_count(provider_uri)
+        if n_instruments > 0:
+            env_to_use["n_instruments"] = str(n_instruments)
+        else:
+            n_instruments = 2
         env_to_use["FACTOR_N_INSTRUMENTS"] = str(n_instruments)
         # The feedback generator runs in this process, not in the qrun
         # subprocess. Mirror the frequency/width variables so its metric list

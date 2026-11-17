@@ -74,6 +74,11 @@ def resolve_universe(settings: CryptoDataSettings, adapter: ExchangeAdapter) -> 
     if mode == "point_in_time":
         volumes = adapter.quote_volumes_at(settings.start, settings.rank_lookback_days)
     else:
+        logger.warning(
+            "CRYPTO_UNIVERSE_MODE=top_n ranks by today's liquidity, so backtests over a "
+            "past range suffer look-ahead survivorship bias; use 'point_in_time' (default) "
+            "or an explicit curated universe for research."
+        )
         volumes = adapter.quote_volumes()
 
     candidates = [symbol for symbol in volumes if _is_tradable_pair(symbol, quote)]
